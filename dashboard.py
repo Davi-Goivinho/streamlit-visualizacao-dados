@@ -9,7 +9,7 @@ import plotly.graph_objects as go
 # pyrefly: ignore [missing-import]
 from plotly.subplots import make_subplots
 
-# Configuração da página (deve ser o primeiro comando Streamlit executado)
+# Configuração da página
 st.set_page_config(layout='wide', page_title='Dashboard de Vendas', page_icon='📊')
 
 
@@ -246,6 +246,30 @@ else:
     fig_trend.update_yaxes(title_text="Quantidade de Peças", secondary_y=True)
     fig_trend.update_xaxes(title_text="")
 
+
+    # Gráfico de avaliação vendedor
+    avaliacao_vendedor = produtos_filtrados.groupby('Vendedor')[['Avaliação da compra']].agg({'Avaliação da compra': 'mean'}).reset_index()
+    avaliacao_vendedor = avaliacao_vendedor.rename(columns={'Avaliação da compra': 'Avaliação Média'})
+
+    fig_avaliacao = px.bar(
+        avaliacao_vendedor.sort_values('Avaliação Média', ascending=True),
+        x='Avaliação Média',
+        y='Vendedor',
+        orientation='h',
+        text_auto='.2s',
+        title='Avaliação Média por Vendedor',
+        template='plotly_white',
+        color='Avaliação Média',
+        color_continuous_scale='Blues'
+    )
+    fig_avaliacao.update_layout(
+        title_font_size=20,
+        xaxis_title='Avaliação Média (R$)',
+        yaxis_title='',
+        margin=dict(t=60, b=40, l=40, r=20),
+    )
+
+
     ### Renderização dos Gráficos na Tela ###
 
     col5, col6 = st.columns(2)
@@ -255,7 +279,8 @@ else:
     st.plotly_chart(fig_trend, use_container_width=True)
 
     col7, col8 = st.columns(2)
-    col7.plotly_chart(fig_boxplot, use_container_width=True)
+    col7.plotly_chart(fig_avaliacao, use_container_width=True)
     col8.plotly_chart(fig_vendedor, use_container_width=True)
 
     st.dataframe(produtos_filtrados, use_container_width=True)
+    st.plotly_chart(fig_boxplot, use_container_width=True)
