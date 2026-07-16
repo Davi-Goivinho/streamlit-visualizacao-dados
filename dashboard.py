@@ -247,28 +247,75 @@ else:
     fig_trend.update_xaxes(title_text="")
 
 
-    # Gráfico de avaliação vendedor
-    avaliacao_vendedor = produtos_filtrados.groupby('Vendedor')[['Avaliação da compra']].agg({'Avaliação da compra': 'mean'}).reset_index()
-    avaliacao_vendedor = avaliacao_vendedor.rename(columns={'Avaliação da compra': 'Avaliação Média'})
+    # Gráfico de Tendência de Vendas Heatmap (Receita por Mês x Ano)
+    df_heatmap = produtos_filtrados.copy()
+    df_heatmap['Ano'] = df_heatmap['Data da Compra'].dt.year
+    df_heatmap['Mês'] = df_heatmap['Data da Compra'].dt.month
+
+    heatmap_pivot = df_heatmap.groupby(['Ano', 'Mês'])['Preço'].sum().reset_index()
+    heatmap_pivot = heatmap_pivot.pivot(index='Ano', columns='Mês', values='Preço').fillna(0)
+
+    # Renomear colunas de número para nome de mês
+    nomes_meses = {1: 'Jan', 2: 'Fev', 3: 'Mar', 4: 'Abr', 5: 'Mai', 6: 'Jun',
+                   7: 'Jul', 8: 'Ago', 9: 'Set', 10: 'Out', 11: 'Nov', 12: 'Dez'}
+    heatmap_pivot.columns = [nomes_meses.get(c, str(c)) for c in heatmap_pivot.columns]
+    heatmap_pivot.index = heatmap_pivot.index.astype(str)
+
+    fig_heatmap = px.imshow(
+        heatmap_pivot,
+        title='Receita por Mês/Ano (Heatmap)',
+        template='plotly_white',
+        color_continuous_scale='Blues',
+        labels={'x': 'Mês', 'y': 'Ano', 'color': 'Receita (R$)'},
+        text_auto='.2s',
+        aspect='auto'
+    )
+    fig_heatmap.update_layout(
+        title_font_size=20,
+        margin=dict(t=60, b=40, l=60, r=20),
+    )
+
+
+    # Gráfico de avaliação categorias
+    avaliacao_categoria = produtos_filtrados.groupby('Categoria do Produto')[['Avaliação da compra']].agg({'Avaliação da compra': 'mean'}).reset_index()
+    avaliacao_categoria = avaliacao_categoria.rename(columns={'Avaliação da compra': 'Avaliação Média'})
 
     fig_avaliacao = px.bar(
-        avaliacao_vendedor.sort_values('Avaliação Média', ascending=True),
+        avaliacao_categoria.sort_values('Avaliação Média', ascending=True),
         x='Avaliação Média',
-        y='Vendedor',
+        y='Categoria do Produto',
         orientation='h',
         text_auto='.2s',
-        title='Avaliação Média por Vendedor',
+        title='Avaliação Média por Categoria',
         template='plotly_white',
         color='Avaliação Média',
         color_continuous_scale='Blues'
     )
     fig_avaliacao.update_layout(
         title_font_size=20,
-        xaxis_title='Avaliação Média (R$)',
+        xaxis_title='Avaliação Média',
         yaxis_title='',
         margin=dict(t=60, b=40, l=40, r=20),
     )
 
+
+    # Gráfico de Valor x parcela
+
+    fig_valor_parcela = px.scatter(
+        produtos_filtrados,
+        x='Preço',
+        y='Quantidade de parcelas',
+        color='Categoria do Produto',
+        hover_data={'Preço': ':.2f', 'Quantidade de parcelas': True},
+        title='Relação Preço x Quantidade de Parcelas',
+    )
+    fig_valor_parcela.update_layout(
+        title_font_size=20,
+        xaxis_title='Preço',
+        yaxis_title='Quantidade de parcelas',
+        template='plotly_white',
+        margin=dict(t=60, b=40, l=40, r=20),
+    )
 
     ### Renderização dos Gráficos na Tela ###
 
@@ -277,10 +324,11 @@ else:
     col6.plotly_chart(fig_receita_localizacao, use_container_width=True)
 
     st.plotly_chart(fig_trend, use_container_width=True)
+    st.plotly_chart(fig_heatmap, use_container_width=True)
 
     col7, col8 = st.columns(2)
     col7.plotly_chart(fig_avaliacao, use_container_width=True)
     col8.plotly_chart(fig_vendedor, use_container_width=True)
 
-    st.dataframe(produtos_filtrados, use_container_width=True)
     st.plotly_chart(fig_boxplot, use_container_width=True)
+    st.plotly_chart(fig_valor_parcela, use_container_width=True)
