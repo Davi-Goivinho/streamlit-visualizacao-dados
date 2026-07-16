@@ -1,0 +1,6 @@
+.DS_Store
+.context/
+.impeccable/
+.venv/
+__pycache__/
+*.py[cod]
