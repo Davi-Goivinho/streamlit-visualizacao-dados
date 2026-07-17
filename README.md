@@ -83,39 +83,43 @@ O dashboard gera automaticamente notas de leitura rápida com base nos dados fil
 
 O módulo `analytics/clustering.py` é independente do dashboard e pode ser executado no terminal ou importado em notebooks.
 
-### Premissa
+### Abordagem
 
-O dataset não possui um ID de cliente. A estratégia adotada é inferir um identificador regional: cada par único de `(lat, lon)` é tratado como um **mercado regional**. Como as coordenadas representam o centróide de cada UF, o resultado é uma segmentação estadual por perfil de compra.
+Cada linha do dataset é tratada como uma **transação individual** (um "cliente"). O modelo agrupa os compradores por **perfil de compra** — preço, frete, parcelas e avaliação — sem depender de localização geográfica.
+
+Essa escolha evita que estados com poucas vendas (ex.: RR com 2 registros) se tornem outliers isolados e produz clusters que representam perfis de consumo reais e acionáveis.
 
 ### Pipeline
 
 ```
-Dados brutos → Identificação de mercados (lat/lon)
-             → Agregação de perfil (ticket, frete, parcelas)
-             → Normalização (StandardScaler)
-             → Método do Cotovelo (Elbow + Silhouette)
-             → K-Means (n clusters configurável)
-             → Propagação para transações originais
-             → Resumo por cluster
+9.435 transações
+  → Seleção de features comportamentais
+  → Normalização (StandardScaler / Z-score)
+  → Método do Cotovelo (Elbow + Silhouette Score)
+  → K-Means (k configurável)
+  → Ordenação dos clusters por ticket médio
+  → Resumo agregado por cluster
 ```
 
 ### Features utilizadas
 
-| Feature | Tipo | Descrição |
-|---------|------|-----------|
-| `lat`, `lon` | Geográfica | Localização do mercado |
-| `Preço` | Comportamental | Ticket médio do mercado |
-| `Frete` | Comportamental | Frete médio |
-| `Quantidade de parcelas` | Comportamental | Média de parcelas |
+| Feature | Descrição |
+|---------|-----------|
+| `Preço` | Valor do produto (R$) |
+| `Frete` | Custo do frete (R$) |
+| `Quantidade de parcelas` | Número de parcelas escolhidas (1–24) |
+| `Avaliação da compra` | Nota de satisfação do cliente (1–5) |
 
-### Resultado de exemplo (k=4)
+### Resultado (k=4)
 
-| Cluster | Vendas | Receita | Ticket Médio | Regiões |
-|---------|--------|---------|--------------|---------|
-| Grupo A | 8.371 | R$ 5,2 mi | R$ 624 | SP, RJ, MG, PR, RS, SC, ES |
-| Grupo D | 1.026 | R$ 612 mil | R$ 597 | BA, CE, PE, MA + 7 UFs |
-| Grupo C | 36 | R$ 27 mil | R$ 752 | AC, AM, RO |
-| Grupo B | 2 | R$ 4 mil | R$ 2.098 | RR |
+| Cluster | Vendas | % Total | Ticket Médio | Parcelas | Perfil |
+|---------|--------|---------|--------------|----------|--------|
+| **Econômico** | 5.477 | 58,0% | R$ 203 | 1,8 | Compras de baixo valor, à vista, frete barato |
+| **Intermediário** | 1.477 | 15,7% | R$ 378 | 8,1 | Ticket baixo mas parcela bastante — perfil crédito |
+| **Premium** | 1.650 | 17,5% | R$ 1.227 | 1,9 | Compra caro e paga à vista |
+| **Alto Valor** | 831 | 8,8% | R$ 2.611 | 3,2 | Ticket altíssimo — eletrônicos e eletrodomésticos |
+
+> Os clusters são automaticamente ordenados por ticket médio (menor → maior) e recebem rótulos descritivos.
 
 ### Como executar
 
@@ -124,7 +128,7 @@ Dados brutos → Identificação de mercados (lat/lon)
 python analytics/clustering.py
 ```
 
-O output formatado no terminal inclui: metadados, tabela do Elbow Method com indicação do melhor k, resumo por cluster e amostra de transações clusterizadas.
+O output formatado no terminal inclui: metadados, tabela do Elbow Method com indicação do melhor k, perfil detalhado de cada cluster (com top 3 categorias e estados), gráfico de distribuição em texto e amostra de transações.
 
 ---
 
@@ -241,11 +245,11 @@ GET https://labdados.com/produtos
 - **Exportação CSV** — separador `;`, decimal `,` e encoding `utf-8-sig` (Excel pt-BR)
 
 ### Machine Learning (módulo `analytics/`)
-- **Engenharia de features** — inferência de ID de cliente por coordenadas geográficas
-- **Pré-processamento** — normalização com `StandardScaler` (Z-score)
-- **Elbow Method** — curva de inércia (WCSS) + Silhouette Score para escolha de k
-- **K-Means** — segmentação não-supervisionada de mercados regionais
-- **Arquitetura modular** — separação de responsabilidades (UI × ML)
+- **Clusterização comportamental** — cada transação é tratada como um cliente individual, agrupada por perfil de compra
+- **Pré-processamento** — normalização com `StandardScaler` (Z-score) para equilibrar escalas
+- **Elbow Method** — curva de inércia (WCSS) + Silhouette Score para escolha do melhor k
+- **K-Means** — segmentação não-supervisionada com rótulos ordenados por ticket médio
+- **Arquitetura modular** — separação de responsabilidades (UI × ML), executável standalone
 
 ---
 
