@@ -81,54 +81,60 @@ O dashboard gera automaticamente notas de leitura rápida com base nos dados fil
 
 ## 🤖 Módulo de Clusterização (Machine Learning)
 
-O módulo `analytics/clustering.py` é independente do dashboard e pode ser executado no terminal ou importado em notebooks.
+O projeto conta com dois scripts no diretório `analytics/` que abordam a segmentação de compradores sob óticas diferentes: o **K-Means clássico** e o **K-Prototypes avançado** (para dados mistos). Ambos rodam de forma independente do dashboard.
 
-### Abordagem
+---
 
-Cada linha do dataset é tratada como uma **transação individual** (um "cliente"). O modelo agrupa os compradores por **perfil de compra** — preço, frete, parcelas e avaliação — sem depender de localização geográfica.
+### Abordagem 1: K-Means (Perfil de Compra Numérico)
+Trata cada transação como um cliente individual e agrupa os compradores exclusivamente por suas variáveis comportamentais numéricas.
 
-Essa escolha evita que estados com poucas vendas (ex.: RR com 2 registros) se tornem outliers isolados e produz clusters que representam perfis de consumo reais e acionáveis.
+* **Arquivo:** `analytics/clustering.py`
+* **Features:** `Preço`, `Frete`, `Quantidade de parcelas`, `Avaliação da compra`
+* **Limitação:** Não consegue usar variáveis descritivas (texto) como categoria do produto e tipo de pagamento sem inflar a dimensionalidade (One-Hot Encoding).
 
-### Pipeline
+#### Resultado (k=4) no K-Means
+| Cluster | Vendas | % Total | Ticket Médio | Parcelas | Perfil do Cluster |
+|---------|--------|---------|--------------|----------|-------------------|
+| **Grupo 1 (Econômico)** | 5.477 | 58,0% | R$ 203 | 1,8 | Compras baratas, à vista, frete baixo, alta satisfação |
+| **Grupo 2 (Intermediário)** | 1.477 | 15,7% | R$ 378 | 8,1 | Ticket baixo, parcelamento alto — comprador a crédito |
+| **Grupo 3 (Premium)** | 1.650 | 17,5% | R$ 1.227 | 1,9 | Compras caras, pagamento à vista |
+| **Grupo 4 (Alto Valor)** | 831 | 8,8% | R$ 2.611 | 3,2 | Ticket altíssimo — eletrônicos e eletrodomésticos |
 
-```
-9.435 transações
-  → Seleção de features comportamentais
-  → Normalização (StandardScaler / Z-score)
-  → Método do Cotovelo (Elbow + Silhouette Score)
-  → K-Means (k configurável)
-  → Ordenação dos clusters por ticket médio
-  → Resumo agregado por cluster
-```
+---
 
-### Features utilizadas
+### Abordagem 2: K-Prototypes (Discussão Avançada de Dados Mistos)
+Para demonstrar um maior domínio conceitual e de arquitetura de dados, foi implementado o **K-Prototypes** (usando a biblioteca `kmodes`). Ele resolve o limite do K-Means permitindo calcular distâncias em dados mistos.
 
-| Feature | Descrição |
-|---------|-----------|
-| `Preço` | Valor do produto (R$) |
-| `Frete` | Custo do frete (R$) |
-| `Quantidade de parcelas` | Número de parcelas escolhidas (1–24) |
-| `Avaliação da compra` | Nota de satisfação do cliente (1–5) |
+* **Arquivo:** `analytics/clustering_kproto.py`
+* **Features Numéricas:** `Preço`, `Frete`, `Quantidade de parcelas`, `Avaliação da compra`
+* **Features Categóricas:** `Categoria do Produto`, `Tipo de pagamento`
 
-### Resultado (k=4)
+#### Diferencial Técnico do K-Prototypes
+Em vez de forçar o mapeamento de palavras em números artificiais (Label Encoding) ou criar 10 colunas extras de 0 e 1 (One-Hot Encoding), o K-Prototypes aplica **Distância Euclidiana** para as variáveis numéricas e a **dissimilaridade por correspondência** para as categóricas (usando a moda como centróide do grupo de texto).
 
-| Cluster | Vendas | % Total | Ticket Médio | Parcelas | Perfil |
-|---------|--------|---------|--------------|----------|--------|
-| **Econômico** | 5.477 | 58,0% | R$ 203 | 1,8 | Compras de baixo valor, à vista, frete barato |
-| **Intermediário** | 1.477 | 15,7% | R$ 378 | 8,1 | Ticket baixo mas parcela bastante — perfil crédito |
-| **Premium** | 1.650 | 17,5% | R$ 1.227 | 1,9 | Compra caro e paga à vista |
-| **Alto Valor** | 831 | 8,8% | R$ 2.611 | 3,2 | Ticket altíssimo — eletrônicos e eletrodomésticos |
+#### Resultado Prático (k=4) no K-Prototypes
+O algoritmo revelou grupos muito mais profundos sobre a base de vendas:
+* **Grupo 1 (Detratores / Insatisfeitos - 18,7%):** Clientes com ticket de R$ 337 e **pior avaliação média (1,77 / 5)**. Focado em Móveis.
+* **Grupo 2 (Compradores de Tecnologia - 15,4%):** Ticket altíssimo de R$ 2.191 com frete de R$ 116. Focado em **Eletrônicos** no cartão.
+* **Grupo 3 (Promotores Móveis - 52,8%):** O maior grupo da base. Ticket de R$ 323, pagamento à vista, **excelente satisfação (4,75 / 5)**.
+* **Grupo 4 (Parcelados em Móveis - 13,2%):** Ticket de R$ 393 com **média de parcelas de 8,5**.
 
-> Os clusters são automaticamente ordenados por ticket médio (menor → maior) e recebem rótulos descritivos.
+> 💡 **Nota de Estudo:** Enquanto o K-Means clássico segmentou apenas por faixa de preço, o K-Prototypes isolou de forma brilhante o perfil de satisfação (promotores vs detratores) e a categoria mais comprada.
 
-### Como executar
+---
+
+### Como executar as análises localmente
+
+A partir da raiz do projeto:
 
 ```bash
-# A partir da raiz do projeto:
+# Executa o modelo K-Means com avaliação do Silhouette
 python analytics/clustering.py
+
+# Executa o modelo avançado K-Prototypes para dados mistos
+python analytics/clustering_kproto.py
 ```
 
-O output formatado no terminal inclui: metadados, tabela do Elbow Method com indicação do melhor k, perfil detalhado de cada cluster (com top 3 categorias e estados), gráfico de distribuição em texto e amostra de transações.
 
 ---
 

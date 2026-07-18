@@ -1,14 +1,3 @@
-"""
-analytics/clustering.py
-=======================
-Clusterização de compradores por perfil de compra usando K-Means.
-
-Cada linha do dataset é tratada como uma transação individual (um "cliente").
-O modelo agrupa os compradores por comportamento — preço, frete, parcelas e
-avaliação — sem depender de localização geográfica. Isso evita que estados
-com poucas vendas (ex.: RR com 2 registros) se tornem outliers isolados.
-"""
-
 from __future__ import annotations
 
 import warnings
@@ -21,32 +10,17 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import StandardScaler
 
-# ---------------------------------------------------------------------------
-# Features utilizadas no modelo
-# ---------------------------------------------------------------------------
+
+#Features utilizadas no modelo
 
 FEATURES_PADRAO = [
     "Preço",
     "Frete",
     "Quantidade de parcelas",
-    "Avaliação da compra",
+    #"Avaliação da compra",
 ]
 
-ROTULOS_CLUSTER = {
-    "0": "Econômico",
-    "1": "Intermediário",
-    "2": "Premium",
-    "3": "Alto Valor",
-    "4": "Grupo E",
-    "5": "Grupo F",
-    "6": "Grupo G",
-    "7": "Grupo H",
-}
-
-
-# ---------------------------------------------------------------------------
 # Etapa 1 — Pré-processamento
-# ---------------------------------------------------------------------------
 
 
 def prepara_features(
@@ -63,9 +37,7 @@ def prepara_features(
     return df_limpo, X_scaled, scaler
 
 
-# ---------------------------------------------------------------------------
 # Etapa 2 — Método do Cotovelo (Elbow + Silhouette)
-# ---------------------------------------------------------------------------
 
 
 def calcula_elbow(
@@ -74,10 +46,7 @@ def calcula_elbow(
     k_max: int = 10,
     amostra: int | None = 5000,
 ) -> pd.DataFrame:
-    """
-    Calcula inércia e Silhouette Score para cada k.
-    Usa amostragem para o Silhouette quando o dataset é grande (performance).
-    """
+
     n_amostras = X_scaled.shape[0]
 
     resultados = []
@@ -100,9 +69,7 @@ def calcula_elbow(
     return pd.DataFrame(resultados)
 
 
-# ---------------------------------------------------------------------------
-# Etapa 3 — Aplicar K-Means
-# ---------------------------------------------------------------------------
+#Etapa 3 — Aplicar K-Means
 
 
 def aplica_kmeans(
@@ -122,20 +89,16 @@ def aplica_kmeans(
         .sort_values()
         .reset_index()
     )
-    mapa_ordem = {raw: idx for idx, raw in enumerate(ordem["Cluster_raw"])}
+    mapa_ordem = {raw: idx + 1 for idx, raw in enumerate(ordem["Cluster_raw"])}
 
     df["Cluster"] = df["Cluster_raw"].map(mapa_ordem).astype(str)
-    df["Cluster_label"] = df["Cluster"].map(
-        lambda c: ROTULOS_CLUSTER.get(c, f"Grupo {c}")
-    )
+    df["Cluster_label"] = df["Cluster"].map(lambda c: f"Grupo {c}")
     df.drop(columns=["Cluster_raw"], inplace=True)
 
     return df
 
 
-# ---------------------------------------------------------------------------
 # Etapa 4 — Resumo por cluster
-# ---------------------------------------------------------------------------
 
 
 def agrega_por_cluster(df: pd.DataFrame) -> pd.DataFrame:
@@ -164,9 +127,7 @@ def agrega_por_cluster(df: pd.DataFrame) -> pd.DataFrame:
     return resumo
 
 
-# ---------------------------------------------------------------------------
 # Pipeline completo
-# ---------------------------------------------------------------------------
 
 
 def pipeline_completo(
@@ -205,9 +166,7 @@ def pipeline_completo(
     }
 
 
-# ---------------------------------------------------------------------------
 # Execução direta: python analytics/clustering.py
-# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     import requests
@@ -218,7 +177,7 @@ if __name__ == "__main__":
     print("  CLUSTERIZAÇÃO POR PERFIL DE COMPRA — LabDados")
     print(SEP)
 
-    # ── Carrega dados ───────────────────────────────────────────
+    # Carrega dados 
     print("\n📥 Baixando dados da API...")
     response = requests.get("https://labdados.com/produtos", timeout=20)
     response.raise_for_status()
@@ -229,7 +188,7 @@ if __name__ == "__main__":
     )
     print(f"   {len(df):,} transações carregadas.\n")
 
-    # ── Roda o pipeline ─────────────────────────────────────────
+    # Roda o pipeline 
     N_CLUSTERS = 4
     print(f"  Rodando pipeline com k={N_CLUSTERS}...")
     print(f"   Features: {', '.join(FEATURES_PADRAO)}")
@@ -240,7 +199,7 @@ if __name__ == "__main__":
         k_max_elbow=10,
     )
 
-    # ── Metadados ───────────────────────────────────────────────
+    # Metadados 
     print(f"\n{SEP}")
     print("  METADADOS")
     print(SEP)
@@ -248,7 +207,7 @@ if __name__ == "__main__":
     print(f"  Clusters gerados      : {resultado['n_clusters']}")
     print(f"  Features usadas       : {', '.join(resultado['features_usadas'])}")
 
-    # ── Elbow Method ────────────────────────────────────────────
+    # Elbow Method
     if resultado["metricas_elbow"] is not None:
         print(f"\n{SEP}")
         print("  ELBOW METHOD (inércia + silhouette por k)")
@@ -265,7 +224,7 @@ if __name__ == "__main__":
             )
         print(f"\n  Melhor k pelo Silhouette: {melhor_k}")
 
-    # ── Resumo por cluster ──────────────────────────────────────
+    # Resumo por cluster 
     print(f"\n{SEP}")
     print("  PERFIL DE CADA CLUSTER")
     print(SEP)
@@ -281,7 +240,7 @@ if __name__ == "__main__":
         print(f"     Top 3 categorias: {row['Categorias']}")
         print(f"     Estados         : {row['Estados']}")
 
-    # ── Distribuição de transações por cluster ───────────────────
+    # Distribuição de transações por cluster
     print(f"\n{SEP}")
     print("  DISTRIBUIÇÃO")
     print(SEP)
@@ -292,7 +251,7 @@ if __name__ == "__main__":
         barra = "█" * int(pct / 2)
         print(f"  {cluster:<15} {count:>5,} ({pct:>5.1f}%)  {barra}")
 
-    # ── Amostra ─────────────────────────────────────────────────
+    # Amostra 
     print(f"\n{SEP}")
     print("  AMOSTRA — 5 transações de cada cluster")
     print(SEP)
