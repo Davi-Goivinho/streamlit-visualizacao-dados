@@ -123,6 +123,22 @@ O algoritmo revelou grupos muito mais profundos sobre a base de vendas:
 
 ---
 
+### 📏 Como interpretar os gráficos de avaliação (Escolha do 'k')
+
+Para escolher o número ideal de clusters ($k$), o dashboard fornece gráficos de avaliação matemática que antecedem a exibição dos resultados.
+
+**1. Custo / Inércia (Elbow Method)**
+* **O que é:** Soma dos erros (distância entre o cliente e o centro do seu grupo).
+* **Como ler:** A curva sempre cai conforme aumentamos o número de grupos. O segredo não é procurar o menor valor, mas sim o **"cotovelo"** (a quina do gráfico), que é o ponto onde a curva para de cair drasticamente. Adicionar mais clusters a partir dali não traz grandes ganhos.
+
+**2. Silhouette Score**
+* **O que é:** Mede a coesão (semelhança interna do grupo) e separação (diferença para os outros grupos). Varia de -1 a 1.
+* **Como ler:** Procure simplesmente o **maior pico** (a barra mais alta).
+
+> ⚠️ **Por que o K-Prototypes não usa Silhouette?** A fórmula do Silhouette exige calcular distâncias físicas em "linha reta". Como o K-Prototypes trabalha com dados mistos (textos e números), essa fórmula matemática "quebra". Portanto, para avaliar o K-Prototypes, a única forma cientificamente honesta é analisar o **Custo Misto (Inércia)**, que soma a distância física com a penalidade por palavras diferentes.
+
+---
+
 ### Como executar as análises localmente
 
 A partir da raiz do projeto:

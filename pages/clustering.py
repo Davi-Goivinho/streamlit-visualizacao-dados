@@ -1,5 +1,5 @@
 # pyrefly: ignore [missing-import]
-import html
+from io import StringIO
 from pathlib import Path
 
 import pandas as pd
@@ -7,12 +7,19 @@ import pandas as pd
 # pyrefly: ignore [missing-import]
 import plotly.express as px
 import requests
+
 # pyrefly: ignore [missing-import]
 import streamlit as st
 
 from analytics.clustering import FEATURES_PADRAO, pipeline_completo
+from analytics.clustering_kproto import (
+    FEATURES_CATEGORICAS,
+    FEATURES_NUMERICAS,
+    analisa_resumo,
+    executa_kprototypes,
+)
 
-#Configuração da página 
+# ── Configuração da página ──────────────────────────────────────────────────
 
 st.set_page_config(
     layout="wide",
@@ -57,8 +64,21 @@ PAGAMENTOS = {
     "cupom": "Cupom",
 }
 
+# Opções disponíveis para cada tipo de filtro
+FEATURES_NUMERICAS_DISPONIVEIS = [
+    "Preço",
+    "Frete",
+    "Quantidade de parcelas",
+    "Avaliação da compra",
+]
 
-#Funções auxiliares 
+FEATURES_CATEGORICAS_DISPONIVEIS = [
+    "Categoria do Produto",
+    "Tipo de pagamento",
+]
+
+
+# ── Funções auxiliares ──────────────────────────────────────────────────────
 
 
 def _carrega_estilos() -> str:
@@ -110,7 +130,145 @@ def estiliza_grafico(figura, altura=420):
     return figura
 
 
-#Carregamento de dados 
+def render_avaliacoes_juntas(elbow_km, elbow_kp, n_clusters):
+    if elbow_km is None or elbow_kp is None:
+        return
+        
+    st.markdown("---")
+    st.markdown("#### 📏 Como escolher o melhor número de clusters (k)?")
+    st.info("💡 **Dicas de Leitura:**\n"
+            "* **Custo (Elbow):** Procure a 'quina' (cotovelo) onde a curva para de cair drasticamente.\n"
+            "* **Silhouette Score:** Procure o **maior pico**.\n"
+            "* **Atenção:** O K-Prototypes não usa Silhouette porque a fórmula não funciona matematicamente para dados em texto. Use apenas o Custo Misto para avaliá-lo.")
+            
+    c1, c2, c3 = st.columns(3, gap="medium")
+    
+    with c1:
+        fig_inercia = px.line(elbow_km, x="k", y="inercia", markers=True, title="K-Means: Custo (Elbow)")
+        fig_inercia.update_traces(line_color=PALETA_CLUSTERS[0], marker=dict(size=8))
+        fig_inercia.add_vline(x=n_clusters, line_dash="dash", line_color=PALETA_CLUSTERS[1], annotation_text=f"k={n_clusters}")
+        fig_inercia.update_xaxes(title="k (número de clusters)", dtick=1)
+        fig_inercia.update_yaxes(title="Inércia")
+        estiliza_grafico(fig_inercia, altura=350)
+        st.plotly_chart(fig_inercia, use_container_width=True, config=CONFIG_GRAFICOS)
+        
+    with c2:
+        fig_sil = px.line(elbow_km, x="k", y="silhouette", markers=True, title="K-Means: Silhouette Score")
+        fig_sil.update_traces(line_color=PALETA_CLUSTERS[2], marker=dict(size=8))
+        fig_sil.add_vline(x=n_clusters, line_dash="dash", line_color=PALETA_CLUSTERS[1], annotation_text=f"k={n_clusters}")
+        fig_sil.update_xaxes(title="k (número de clusters)", dtick=1)
+        fig_sil.update_yaxes(title="Silhouette Score")
+        estiliza_grafico(fig_sil, altura=350)
+        st.plotly_chart(fig_sil, use_container_width=True, config=CONFIG_GRAFICOS)
+        
+    with c3:
+        fig_cost = px.line(elbow_kp, x="k", y="cost", markers=True, title="K-Prototypes: Custo Misto (Elbow)")
+        fig_cost.update_traces(line_color=PALETA_CLUSTERS[3], marker=dict(size=8))
+        fig_cost.add_vline(x=n_clusters, line_dash="dash", line_color=PALETA_CLUSTERS[1], annotation_text=f"k={n_clusters}")
+        fig_cost.update_xaxes(title="k (número de clusters)", dtick=1)
+        fig_cost.update_yaxes(title="Custo Misto (Inércia)")
+        estiliza_grafico(fig_cost, altura=350)
+        st.plotly_chart(fig_cost, use_container_width=True, config=CONFIG_GRAFICOS)
+
+def render_graficos(df_clust, resumo, sufixo=""):
+    """
+    Renderiza os gráficos que demonstram os clusters (donut, ticket, scatter).
+    """
+    col_dist, col_ticket = st.columns(2, gap="medium")
+
+    with col_dist:
+        fig_dist = px.pie(
+            resumo,
+            values="Vendas",
+            names="Cluster",
+            title="Distribuição de clientes por cluster",
+            color_discrete_sequence=PALETA_CLUSTERS,
+            hole=0.45,
+        )
+        fig_dist.update_traces(
+            textinfo="percent+label",
+            textposition="outside",
+            hovertemplate="<b>%{label}</b><br>%{value:,} vendas (%{percent})<extra></extra>",
+        )
+        estiliza_grafico(fig_dist, altura=400)
+        st.plotly_chart(fig_dist, use_container_width=True, config=CONFIG_GRAFICOS)
+
+    with col_ticket:
+        resumo_ticket = resumo.sort_values("Ticket_Médio", ascending=True)
+        fig_ticket = px.bar(
+            resumo_ticket,
+            x="Ticket_Médio",
+            y="Cluster",
+            orientation="h",
+            title="Ticket médio por cluster",
+            color="Cluster",
+            color_discrete_sequence=PALETA_CLUSTERS,
+            text=resumo_ticket["Ticket_Médio"].map(lambda v: formata_moeda(v, compacta=True)),
+        )
+        fig_ticket.update_traces(textposition="outside", cliponaxis=False, showlegend=False)
+        fig_ticket.update_xaxes(title="Ticket Médio (R$)", showticklabels=False, gridcolor="rgba(0,0,0,0)")
+        fig_ticket.update_yaxes(title="")
+        estiliza_grafico(fig_ticket, altura=400)
+        st.plotly_chart(fig_ticket, use_container_width=True, config=CONFIG_GRAFICOS)
+
+    fig_scatter = px.scatter(
+        df_clust,
+        x="Preço",
+        y="Quantidade de parcelas",
+        color="Cluster_label",
+        color_discrete_sequence=PALETA_CLUSTERS,
+        hover_name="Produto" if "Produto" in df_clust.columns else None,
+        hover_data={"Preço": ":.2f", "Quantidade de parcelas": True, "Cluster_label": True},
+        title="Preço × Parcelas por cluster",
+        render_mode="webgl",
+    )
+    fig_scatter.update_traces(marker=dict(size=5, opacity=0.5))
+    fig_scatter.update_xaxes(title="Preço (R$)")
+    fig_scatter.update_yaxes(title="Parcelas", dtick=2)
+    estiliza_grafico(fig_scatter, altura=480)
+    st.plotly_chart(fig_scatter, use_container_width=True, config=CONFIG_GRAFICOS)
+
+
+def render_tabela_kmeans(resumo):
+    st.dataframe(
+        resumo,
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "Cluster": st.column_config.TextColumn("Cluster", width="medium"),
+            "Vendas": st.column_config.NumberColumn("Vendas", format="%d"),
+            "Receita_Total": st.column_config.NumberColumn("Receita Total", format="R$ %.2f"),
+            "Ticket_Médio": st.column_config.NumberColumn("Ticket Médio", format="R$ %.2f"),
+            "Frete_Médio": st.column_config.NumberColumn("Frete Médio", format="R$ %.2f"),
+            "Parcelas_Médias": st.column_config.NumberColumn("Parcelas Médias", format="%.1f"),
+            "Avaliação_Média": st.column_config.NumberColumn("Avaliação Média", format="%.2f / 5"),
+            "Estados": st.column_config.TextColumn("Estados presentes", width="large"),
+            "Categorias": st.column_config.TextColumn("Top categorias", width="large"),
+        },
+    )
+
+
+def render_tabela_kproto(resumo):
+    st.dataframe(
+        resumo,
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "Cluster": st.column_config.TextColumn("Cluster", width="medium"),
+            "Vendas": st.column_config.NumberColumn("Vendas", format="%d"),
+            "Receita_Total": st.column_config.NumberColumn("Receita Total", format="R$ %.2f"),
+            "Ticket_Médio": st.column_config.NumberColumn("Ticket Médio", format="R$ %.2f"),
+            "Frete_Médio": st.column_config.NumberColumn("Frete Médio", format="R$ %.2f"),
+            "Parcelas_Médias": st.column_config.NumberColumn("Parcelas Médias", format="%.1f"),
+            "Avaliação_Média": st.column_config.NumberColumn("Avaliação Média", format="%.2f / 5"),
+            "Moda_Categoria": st.column_config.TextColumn("Categoria principal"),
+            "Moda_Pagamento": st.column_config.TextColumn("Pagamento principal"),
+            "Top_Estados": st.column_config.TextColumn("Top 3 estados", width="large"),
+        },
+    )
+
+
+# ── Funções de cache ────────────────────────────────────────────────────────
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -135,10 +293,9 @@ def carrega_dados():
     return produtos
 
 
-@st.cache_data(ttl=3600, show_spinner="Rodando clusterização...")
-def roda_clustering(df_json, n_clusters, features_tuple):
-    """Recebe o JSON serializado e uma tupla de features para funcionar com st.cache_data."""
-    from io import StringIO
+@st.cache_data(ttl=3600, show_spinner=False)
+def roda_kmeans(df_json, n_clusters, features_tuple):
+    """K-Means: apenas features numéricas."""
     df = pd.read_json(StringIO(df_json))
     return pipeline_completo(
         df, n_clusters=n_clusters, features=list(features_tuple),
@@ -146,31 +303,90 @@ def roda_clustering(df_json, n_clusters, features_tuple):
     )
 
 
-# CSS e dados 
+@st.cache_data(ttl=3600, show_spinner=False)
+def roda_kproto(df_json, n_clusters, feat_num_tuple, feat_cat_tuple):
+    """K-Prototypes: features numéricas + categóricas."""
+    import warnings
+    from sklearn.preprocessing import StandardScaler
+    from kmodes.kprototypes import KPrototypes
+    from analytics.clustering_kproto import analisa_resumo
+
+    df = pd.read_json(StringIO(df_json))
+
+    feat_num = list(feat_num_tuple)
+    feat_cat = list(feat_cat_tuple)
+    feat_tudo = feat_num + feat_cat
+
+    df_limpo = df.dropna(subset=feat_tudo).copy()
+    df_modelo = df_limpo[feat_tudo].copy()
+
+    scaler = StandardScaler()
+    df_modelo[feat_num] = scaler.fit_transform(df_modelo[feat_num])
+
+    indices_categoricos = [df_modelo.columns.get_loc(c) for c in feat_cat]
+
+    kproto = KPrototypes(n_clusters=n_clusters, init="Cao", random_state=42, n_init=3)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        clusters = kproto.fit_predict(df_modelo.values, categorical=indices_categoricos)
+
+    df_limpo = df_limpo.copy()
+    df_limpo["Cluster"] = (clusters + 1).astype(str)
+    df_limpo["Cluster_label"] = df_limpo["Cluster"].map(lambda c: f"Grupo {c}")
+
+    resumo = analisa_resumo(df_limpo)
+
+    # Curva real de Custo do K-Prototypes
+    # O kmodes.KPrototypes fornece a propriedade .cost_ que soma a distância
+    # euclidiana (numérica) com a penalidade categórica (dissimilaridade).
+    # Como isso demora um pouco, usamos n_init=1 e n_jobs=-1 para acelerar.
+    elbow_kp = []
+    k_min, k_max = 2, min(8, len(df_limpo) - 1)  # limite k=8 por performance
+    for k in range(k_min, k_max + 1):
+        if k == n_clusters:
+            custo = kproto.cost_
+        else:
+            kp_proxy = KPrototypes(n_clusters=k, init="Cao", random_state=42, n_init=1, n_jobs=-1)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                kp_proxy.fit(df_modelo.values, categorical=indices_categoricos)
+            custo = kp_proxy.cost_
+        elbow_kp.append({"k": k, "cost": custo})
+    
+    df_elbow_kp = pd.DataFrame(elbow_kp)
+    custo_atual = kproto.cost_
+
+    return {
+        "df_clusterizado": df_limpo,
+        "resumo_clusters": resumo,
+        "cost_kp": custo_atual,
+        "metricas_elbow": df_elbow_kp,
+    }
+
+
+# ── Página ──────────────────────────────────────────────────────────────────
 
 st.markdown(_carrega_estilos(), unsafe_allow_html=True)
 
 try:
     produtos = carrega_dados()
-except (requests.RequestException, ValueError, TypeError) as erro:
+except (requests.RequestException, ValueError, TypeError):
     st.error("Não foi possível carregar os dados de vendas agora.")
     if st.button("Tentar novamente", type="primary"):
         st.cache_data.clear()
         st.rerun()
     st.stop()
 
-
 # Cabeçalho
-
 st.markdown(
     """
     <header class="page-hero">
         <div>
             <h1>Segmentação de clientes</h1>
             <p>
-                Agrupamento de compradores por perfil de compra usando K-Means.
-                Cada transação é tratada como um cliente individual, segmentado
-                por preço, frete, parcelas e avaliação.
+                Comparativo entre K-Means (variáveis numéricas) e K-Prototypes
+                (variáveis numéricas + categóricas). Ambos os modelos compartilham
+                o mesmo número de clusters e as mesmas métricas numéricas.
             </p>
         </div>
     </header>
@@ -179,19 +395,15 @@ st.markdown(
 )
 
 
-# Controles
+# ── Controles ───────────────────────────────────────────────────────────────
 
-# Todas as colunas numéricas que fazem sentido para clustering
-FEATURES_DISPONIVEIS = [
-    "Preço",
-    "Frete",
-    "Quantidade de parcelas",
-    "Avaliação da compra",
-    "Categoria do Produto",
-    "Vendedor"
-]
+st.markdown("### ⚙️ Parâmetros do modelo")
+st.caption(
+    "O **número de clusters** e as **métricas numéricas** se aplicam a ambos os modelos. "
+    "As **variáveis categóricas** são exclusivas do K-Prototypes."
+)
 
-col_slider, col_features = st.columns([1, 3])
+col_slider, col_num, col_cat = st.columns([1, 2, 2])
 
 with col_slider:
     n_clusters = st.slider(
@@ -199,173 +411,121 @@ with col_slider:
         min_value=2,
         max_value=10,
         value=4,
-        help="Escolha o número de segmentos de clientes.",
+        help="Aplica-se ao K-Means e ao K-Prototypes.",
     )
 
-with col_features:
-    features_selecionadas = st.multiselect(
-        "Features do modelo",
-        options=FEATURES_DISPONIVEIS,
-        default=FEATURES_PADRAO,
-        help="Selecione quais variáveis o K-Means usará para agrupar os clientes.",
+with col_num:
+    feat_num = st.multiselect(
+        "Métricas numéricas",
+        options=FEATURES_NUMERICAS_DISPONIVEIS,
+        default=FEATURES_NUMERICAS_DISPONIVEIS,
+        help="Usadas por ambos os modelos (K-Means e K-Prototypes).",
     )
 
-# Precisa de pelo menos 2 features para o K-Means funcionar
-if len(features_selecionadas) < 2:
-    st.warning("Selecione pelo menos 2 features para rodar a clusterização.")
+with col_cat:
+    feat_cat = st.multiselect(
+        "Variáveis categóricas (K-Prototypes)",
+        options=FEATURES_CATEGORICAS_DISPONIVEIS,
+        default=FEATURES_CATEGORICAS_DISPONIVEIS,
+        help="Exclusivas do K-Prototypes. O K-Means ignora estas colunas.",
+    )
+
+if len(feat_num) < 2:
+    st.warning("Selecione pelo menos 2 métricas numéricas.")
     st.stop()
 
+if len(feat_cat) < 1:
+    st.warning("Selecione pelo menos 1 variável categórica para o K-Prototypes.")
+    st.stop()
 
-# Executar clustering
-# Converte para tupla porque st.cache_data não aceita listas como argumento (não são hashable)
+df_json = produtos.to_json()
 
-with st.spinner("Calculando segmentação..."):
-    resultado = roda_clustering(
-        produtos.to_json(), n_clusters, tuple(features_selecionadas)
-    )
+# ── Indicadores de Custo (Elbow) & Silhouette Score ambos modelors 
 
-df_clust = resultado["df_clusterizado"]
-resumo = resultado["resumo_clusters"]
-elbow = resultado["metricas_elbow"]
+with st.spinner("Treinando K-Means e K-Prototypes... (pode demorar alguns segundos)"):
+    res_km = roda_kmeans(df_json, n_clusters, tuple(feat_num))
+    res_kp = roda_kproto(df_json, n_clusters, tuple(feat_num), tuple(feat_cat))
 
+df_km = res_km["df_clusterizado"]
+resumo_km = res_km["resumo_clusters"]
+elbow_km = res_km["metricas_elbow"]
 
-# KPIs
+df_kp = res_kp["df_clusterizado"]
+resumo_kp = res_kp["resumo_clusters"]
+elbow_kp = res_kp["metricas_elbow"]
+cost_kp = res_kp["cost_kp"]
 
-n_total = resultado["n_transacoes"]
-maior_cluster = resumo.iloc[0]  # já ordenado por ticket
+render_avaliacoes_juntas(elbow_km, elbow_kp, n_clusters)
 
-kpi_cols = st.columns(4)
-kpi_cols[0].metric("Transações analisadas", formata_inteiro(n_total))
-kpi_cols[1].metric("Clusters gerados", n_clusters)
-kpi_cols[2].metric("Maior cluster", f"{resumo.loc[resumo['Vendas'].idxmax(), 'Cluster']}")
-kpi_cols[3].metric(
-    "Silhouette Score",
-    formata_decimal(elbow.loc[elbow["k"] == n_clusters, "silhouette"].values[0], 3)
-    if elbow is not None else "—",
-)
-
-
-#Gráficos 
-
-st.markdown("---")
-
-col_dist, col_elbow = st.columns(2, gap="medium")
-
-# Distribuição dos clusters
-with col_dist:
-    fig_dist = px.pie(
-        resumo,
-        values="Vendas",
-        names="Cluster",
-        title="Distribuição de clientes por cluster",
-        color_discrete_sequence=PALETA_CLUSTERS,
-        hole=0.45,
-    )
-    fig_dist.update_traces(
-        textinfo="percent+label",
-        textposition="outside",
-        hovertemplate="<b>%{label}</b><br>%{value:,} vendas (%{percent})<extra></extra>",
-    )
-    estiliza_grafico(fig_dist, altura=400)
-    st.plotly_chart(fig_dist, use_container_width=True, config=CONFIG_GRAFICOS)
-
-# Curva do Cotovelo
-with col_elbow:
-    if elbow is not None:
-        fig_elbow = px.line(
-            elbow,
-            x="k",
-            y="silhouette",
-            markers=True,
-            title="Silhouette Score por número de clusters",
-        )
-        fig_elbow.update_traces(
-            line_color=PALETA_CLUSTERS[0],
-            marker=dict(size=8),
-        )
-        # Destacar o k atual
-        fig_elbow.add_vline(
-            x=n_clusters,
-            line_dash="dash",
-            line_color=PALETA_CLUSTERS[1],
-            annotation_text=f"k={n_clusters}",
-            annotation_position="top",
-        )
-        fig_elbow.update_xaxes(title="k (número de clusters)", dtick=1)
-        fig_elbow.update_yaxes(title="Silhouette Score")
-        estiliza_grafico(fig_elbow, altura=400)
-        st.plotly_chart(fig_elbow, use_container_width=True, config=CONFIG_GRAFICOS)
-
-
-# Ticket médio por cluster
-fig_ticket = px.bar(
-    resumo.sort_values("Ticket_Médio", ascending=True),
-    x="Ticket_Médio",
-    y="Cluster",
-    orientation="h",
-    title="Ticket médio por cluster",
-    color="Cluster",
-    color_discrete_sequence=PALETA_CLUSTERS,
-    text=resumo.sort_values("Ticket_Médio", ascending=True)["Ticket_Médio"].map(
-        lambda v: formata_moeda(v, compacta=True)
-    ),
-)
-fig_ticket.update_traces(
-    textposition="outside",
-    cliponaxis=False,
-    showlegend=False,
-)
-fig_ticket.update_xaxes(title="Ticket Médio (R$)", showticklabels=False, gridcolor="rgba(0,0,0,0)")
-fig_ticket.update_yaxes(title="")
-estiliza_grafico(fig_ticket, altura=350)
-st.plotly_chart(fig_ticket, use_container_width=True, config=CONFIG_GRAFICOS)
-
-
-# Scatter: Preço x Parcelas colorido por cluster
-fig_scatter = px.scatter(
-    df_clust,
-    x="Preço",
-    y="Quantidade de parcelas",
-    color="Cluster_label",
-    color_discrete_sequence=PALETA_CLUSTERS,
-    hover_name="Produto" if "Produto" in df_clust.columns else None,
-    hover_data={"Preço": ":.2f", "Quantidade de parcelas": True, "Cluster_label": True},
-    title="Preço × Parcelas por cluster",
-    render_mode="webgl",
-)
-fig_scatter.update_traces(marker=dict(size=5, opacity=0.5))
-fig_scatter.update_xaxes(title="Preço (R$)")
-fig_scatter.update_yaxes(title="Parcelas", dtick=2)
-estiliza_grafico(fig_scatter, altura=480)
-st.plotly_chart(fig_scatter, use_container_width=True, config=CONFIG_GRAFICOS)
-
-
-# Tabela resumo 
+# ── Seção K-Means ────────────────────────────────────────────────────────────
 
 st.markdown("---")
 st.markdown(
     """
     <div class="section-intro">
-        <h2>Perfil detalhado de cada cluster</h2>
-        <p>Métricas agregadas por segmento de cliente.</p>
+        <h2>K-Means — Clustering por métricas numéricas</h2>
+        <p>
+            Segmenta os compradores usando apenas variáveis numéricas normalizadas
+            (StandardScaler). Simples, rápido e interpretável.
+        </p>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-st.dataframe(
-    resumo,
-    hide_index=True,
-    use_container_width=True,
-    column_config={
-        "Cluster": st.column_config.TextColumn("Cluster", width="medium"),
-        "Vendas": st.column_config.NumberColumn("Vendas", format="%d"),
-        "Receita_Total": st.column_config.NumberColumn("Receita Total", format="R$ %.2f"),
-        "Ticket_Médio": st.column_config.NumberColumn("Ticket Médio", format="R$ %.2f"),
-        "Frete_Médio": st.column_config.NumberColumn("Frete Médio", format="R$ %.2f"),
-        "Parcelas_Médias": st.column_config.NumberColumn("Parcelas Médias", format="%.1f"),
-        "Avaliação_Média": st.column_config.NumberColumn("Avaliação Média", format="%.2f / 5"),
-        "Estados": st.column_config.TextColumn("Estados presentes", width="large"),
-        "Categorias": st.column_config.TextColumn("Top categorias", width="large"),
-    },
+# KPIs do K-Means
+kpi_cols = st.columns(4)
+kpi_cols[0].metric("Transações", formata_inteiro(res_km["n_transacoes"]))
+kpi_cols[1].metric("Clusters", n_clusters)
+kpi_cols[2].metric("Maior grupo", resumo_km.loc[resumo_km["Vendas"].idxmax(), "Cluster"])
+kpi_cols[3].metric(
+    "Silhouette Score",
+    formata_decimal(
+        elbow_km.loc[elbow_km["k"] == n_clusters, "silhouette"].values[0], 3
+    ) if elbow_km is not None else "—",
+)
+
+st.markdown("#### Distribuição e Características dos Clusters")
+render_graficos(df_km, resumo_km, sufixo="_km")
+
+st.markdown("#### Perfil detalhado — K-Means")
+render_tabela_kmeans(resumo_km)
+
+
+# ── Seção K-Prototypes ───────────────────────────────────────────────────────
+
+st.markdown("---")
+st.markdown(
+    """
+    <div class="section-intro">
+        <h2>K-Prototypes — Clustering por dados mistos</h2>
+        <p>
+            Combina distância euclidiana (variáveis numéricas) com dissimilaridade
+            por correspondência (variáveis categóricas). Nenhum One-Hot Encoding necessário.
+        </p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+# KPIs do K-Prototypes
+kpi_cols2 = st.columns(4)
+kpi_cols2[0].metric("Transações", formata_inteiro(len(df_kp)))
+kpi_cols2[1].metric("Clusters", n_clusters)
+kpi_cols2[2].metric("Maior grupo", resumo_kp.loc[resumo_kp["Vendas"].idxmax(), "Cluster"])
+kpi_cols2[3].metric(
+    "Custo Total (Inércia)",
+    formata_inteiro(cost_kp),
+    help="Métrica de custo nativa do K-Prototypes (soma da distância numérica + dissimilaridade categórica).",
+)
+
+st.markdown("#### Distribuição e Características dos Clusters")
+render_graficos(df_kp, resumo_kp, sufixo="_kp")
+
+st.markdown("#### Perfil detalhado — K-Prototypes")
+render_tabela_kproto(resumo_kp)
+
+st.caption(
+    "K-Means: scikit-learn · K-Prototypes: kmodes — "
+    "Clusters ordenados por ticket médio crescente (Grupo 1 = menor ticket)."
 )

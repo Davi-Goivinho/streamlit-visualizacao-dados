@@ -29,7 +29,7 @@ from sklearn.preprocessing import StandardScaler
 # pyrefly: ignore [missing-import]
 from kmodes.kprototypes import KPrototypes
 
-# ── Configuração das variáveis ──────────────────────────────────────────────
+# Configuração das variáveis 
 
 FEATURES_NUMERICAS = [
     "Preço",
@@ -161,7 +161,7 @@ def analisa_resumo(df_final: pd.DataFrame) -> pd.DataFrame:
     return resumo
 
 
-# ── Execução direta no terminal ─────────────────────────────────────────────
+# Execução direta no terminal
 
 if __name__ == "__main__":
     import numpy as np
